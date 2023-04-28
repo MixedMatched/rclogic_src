@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![feature(box_patterns)]
 use dioxus::prelude::*;
 
 mod components {
