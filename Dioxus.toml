@@ -1,0 +1,36 @@
+[application]
+
+name = "RCLogic"
+default_platform = "web"
+out_dir = "dist"
+asset_dir = "public"
+
+[web.app]
+
+title = "RCLogic"
+base_path = "rclogic"
+
+[web.watcher]
+
+watch_path = ["src"]
+
+# include `assets` in web platform
+[web.resource]
+
+# CSS style file
+style = []
+
+# Javascript code file
+script = []
+
+[web.resource.dev]
+
+# Javascript code file
+# serve: [dev-server] only
+script = []
+
+[application.tools]
+
+# use binaryen.wasm-opt for output Wasm file
+# binaryen just will trigger in `web` platform
+binaryen = { wasm_opt = true }
