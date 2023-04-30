@@ -1,6 +1,6 @@
 use core::fmt;
 
-use dioxus::prelude::*;
+use dioxus::{prelude::*, html::details};
 use nom::{
     branch::alt, bytes::complete::tag, character::complete::multispace0, combinator::map,
     multi::many0, sequence::pair, IResult,
@@ -16,6 +16,21 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
     let mut finished = use_state(cx, || false);
 
     cx.render(rsx! {
+        aside {
+            details {
+                summary {
+                    "Help"
+                }
+                p {
+                    "Enter a proposition in the input box and click Add to add it to the proof, if it is possible from the current propositions. If you are stuck, here are the possible next steps, excluding assumptions:"
+                }
+                for line in all_possible_next(&proof.read()) {
+                    p {
+                        "{line.to_string()}"
+                    }
+                }
+            }
+        }
         for line in &*proof.read() {
             div {
                 dangerous_inner_html: "{line.to_string()}"
@@ -54,7 +69,7 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                             input.set(String::new());
                             line_num += 1;
                             match nline.rule {
-                                Some(PLRule::Assume(_)) => level += 1,
+                                Some(PLRule::Assume) => level += 1,
                                 Some(PLRule::Contradiction(_, _)) => level -= 1,
                                 Some(PLRule::Refute) => level -= 1,
                                 _ => {}
@@ -62,7 +77,7 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                             if *level.get() == 0 {
                                 finished.set(true);
                             }
-                        } else if oline.rule == Some(PLRule::Assume(Vec::new())) {
+                        } else if oline.rule == Some(PLRule::Assume) {
                             proof.push(PLLine { line: Some(*line_num.get()), expr: oline.expr, rule: oline.rule });
                             input.set(String::new());
                             line_num += 1;
@@ -74,8 +89,8 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                                 if let Some(conc) = proof.iter().find(|l| {
                                     l.line.is_none()
                                 }) {
-                                    if conc.expr == Some(a.clone()) && oline.rule == Some(PLRule::Assume(Vec::new())) {
-                                        proof.push(PLLine { line: Some(*line_num.get()), expr: Some(PropositionalLogic::Not(Box::new(a))), rule: Some(PLRule::Assume(Vec::new())) });
+                                    if conc.expr == Some(a.clone()) && oline.rule == Some(PLRule::Assume) {
+                                        proof.push(PLLine { line: Some(*line_num.get()), expr: Some(PropositionalLogic::Not(Box::new(a))), rule: Some(PLRule::Assume) });
                                         input.set(String::new());
                                         line_num += 1;
                                         level += 1;
@@ -195,7 +210,7 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                     started.set(false);
                     finished.set(false);
                 },
-                "Reset",
+                "New Argument",
             }
         }
     })
@@ -224,7 +239,7 @@ enum PLRule {
     MP(usize, usize),
     MT(usize, usize),
     Contradiction(usize, usize),
-    Assume(Vec<PLLine>),
+    Assume,
     Refute,
 }
 
@@ -244,16 +259,28 @@ fn generate_expr(level: u8) -> PropositionalLogic {
             2 => PropositionalLogic::Var('R'),
             3 => PropositionalLogic::Var('S'),
             4 => PropositionalLogic::Var('T'),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     } else {
         match choice {
-            0 => PropositionalLogic::And(Box::new(generate_expr(level-1)), Box::new(generate_expr(level-1))),
-            1 => PropositionalLogic::Iff(Box::new(generate_expr(level-1)), Box::new(generate_expr(level-1))),
-            2 => PropositionalLogic::Implies(Box::new(generate_expr(level-1)), Box::new(generate_expr(level-1))),
-            3 => PropositionalLogic::Not(Box::new(generate_expr(level-1))),
-            4 => PropositionalLogic::Or(Box::new(generate_expr(level-1)), Box::new(generate_expr(level-1))),
-            _ => unreachable!()
+            0 => PropositionalLogic::And(
+                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1)),
+            ),
+            1 => PropositionalLogic::Iff(
+                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1)),
+            ),
+            2 => PropositionalLogic::Implies(
+                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1)),
+            ),
+            3 => PropositionalLogic::Not(Box::new(generate_expr(level - 1))),
+            4 => PropositionalLogic::Or(
+                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1)),
+            ),
+            _ => unreachable!(),
         }
     }
 }
@@ -273,15 +300,41 @@ fn generate_argument() -> Vec<PLLine> {
     lines.push(PLLine {
         line: None,
         expr: Some(generate_expr(random::<u8>() % 4)),
-        rule: None
+        rule: None,
     });
 
     lines
 }
 
 // return every possible next line of the proof
-fn all_possible_next(proof: &Vec<PLLine>) -> Vec<PLLine> {
+fn all_possible_next(input: &Vec<PLLine>) -> Vec<PLLine> {
     let mut possiblities = Vec::new();
+    let mut proof = input.clone();
+    let mut useable = Vec::new();
+
+    let mut assumption_level = 0;
+    for line in proof.iter().rev() {
+        if assumption_level <= 0 {
+            useable.push(true);
+        } else {
+            useable.push(false);
+        }
+
+        if let Some(PLRule::Contradiction(_, _)) = &line.rule {
+            assumption_level += 1;
+        } else if let Some(PLRule::Assume) = &line.rule {
+            assumption_level -= 1;
+        }
+    }
+
+    useable.reverse();
+
+    proof = proof
+        .into_iter()
+        .zip(useable.into_iter())
+        .filter(|(_, useable)| *useable)
+        .map(|(line, _)| line)
+        .collect();
 
     // if the last line is a refutation, then we're done
     if let Some(line) = proof.last() {
@@ -290,7 +343,7 @@ fn all_possible_next(proof: &Vec<PLLine>) -> Vec<PLLine> {
         }
     }
 
-    for line in proof {
+    for line in &proof {
         if line.line.is_none() {
             continue;
         }
@@ -360,14 +413,18 @@ fn all_possible_next(proof: &Vec<PLLine>) -> Vec<PLLine> {
                 PropositionalLogic::Not(box PropositionalLogic::Iff(a, b)) => {
                     possiblities.push(PLLine {
                         line: None,
-                        expr: Some(PropositionalLogic::Or(Box::new(*a.clone()), Box::new(*b.clone()))),
+                        expr: Some(PropositionalLogic::Or(
+                            Box::new(*a.clone()),
+                            Box::new(*b.clone()),
+                        )),
                         rule: Some(PLRule::Niff(line.line.unwrap())),
                     });
                     possiblities.push(PLLine {
                         line: None,
-                        expr: Some(PropositionalLogic::Not(Box::new(
-                            PropositionalLogic::And(Box::new(*a.clone()), Box::new(*b.clone())),
-                        ))),
+                        expr: Some(PropositionalLogic::Not(Box::new(PropositionalLogic::And(
+                            Box::new(*a.clone()),
+                            Box::new(*b.clone()),
+                        )))),
                         rule: Some(PLRule::Niff(line.line.unwrap())),
                     });
                 }
@@ -439,9 +496,17 @@ fn all_possible_next(proof: &Vec<PLLine>) -> Vec<PLLine> {
                 }
                 _ => {}
             }
-            for sli in proof {
-                if sli.expr == Some(PropositionalLogic::Not(Box::new(expr.clone()))) && sli.line.is_some() {
-                    let expr = proof.iter().rev().find(|x| matches!(x.rule, Some(PLRule::Assume(_)))).unwrap().expr.clone();
+            for sli in &proof {
+                if sli.expr == Some(PropositionalLogic::Not(Box::new(expr.clone())))
+                    && sli.line.is_some()
+                {
+                    let expr = proof
+                        .iter()
+                        .rev()
+                        .find(|x| matches!(x.rule, Some(PLRule::Assume)))
+                        .unwrap()
+                        .expr
+                        .clone();
                     possiblities.push(PLLine {
                         line: None,
                         expr: match expr {
@@ -456,7 +521,7 @@ fn all_possible_next(proof: &Vec<PLLine>) -> Vec<PLLine> {
     }
 
     possiblities.retain(|x| {
-        if proof.iter().any(|y| y.expr == x.expr && !y.line.is_none()) {
+        if proof.iter().any(|y| y.expr == x.expr && y.line.is_some() && !matches!(x.rule, Some(PLRule::Contradiction(_, _)))) {
             return false;
         }
         true
@@ -519,7 +584,7 @@ fn parse_assumption(input: &str) -> IResult<&str, PLLine> {
         PLLine {
             line: None,
             expr: Some(expr),
-            rule: Some(PLRule::Assume(Vec::new())),
+            rule: Some(PLRule::Assume),
         },
     ))
 }
@@ -551,7 +616,7 @@ impl fmt::Display for PLRule {
             PLRule::MP(i, j) => write!(f, "MP, {}, {}", i, j),
             PLRule::MT(i, j) => write!(f, "MT, {}, {}", i, j),
             PLRule::Contradiction(i, j) => write!(f, "Contradiction from {}, {}", i, j),
-            PLRule::Assume(arg) => write!(f, "Assume"),
+            PLRule::Assume => write!(f, "Assume"),
             PLRule::Refute => write!(f, "Refute"),
         }
     }
@@ -808,10 +873,13 @@ mod tests {
     #[test]
     fn parse_pll() {
         let parsed = parse_line("Refute").unwrap().1;
-        assert_eq!(parsed, PLLine {
-            line: None,
-            expr: None,
-            rule: Some(PLRule::Refute),
-        });
+        assert_eq!(
+            parsed,
+            PLLine {
+                line: None,
+                expr: None,
+                rule: Some(PLRule::Refute),
+            }
+        );
     }
 }
