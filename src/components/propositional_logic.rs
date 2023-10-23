@@ -1,6 +1,6 @@
 use core::fmt;
 
-use dioxus::{prelude::*, html::details};
+use dioxus::prelude::*;
 use nom::{
     branch::alt, bytes::complete::tag, character::complete::multispace0, combinator::map,
     multi::many0, sequence::pair, IResult,
@@ -8,12 +8,12 @@ use nom::{
 use rand::prelude::*;
 
 pub fn PropositionalLogic(cx: Scope) -> Element {
-    let mut proof = use_ref(cx, generate_argument);
-    let mut input = use_state(cx, String::new);
+    let proof = use_ref(cx, generate_argument);
+    let input = use_state(cx, String::new);
     let mut level = use_state(cx, || 0);
     let mut line_num = use_state(cx, || proof.read().len());
-    let mut started = use_state(cx, || false);
-    let mut finished = use_state(cx, || false);
+    let started = use_state(cx, || false);
+    let finished = use_state(cx, || false);
 
     cx.render(rsx! {
         aside {
@@ -22,7 +22,7 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                     "Help"
                 }
                 p {
-                    "Enter a proposition in the input box and click Add to add it to the proof, if it is possible from the current propositions. If you are stuck, here are the possible next steps, excluding assumptions:"
+                    "Enter a proposition in the input box and click Add to add it to the proof, if it is possible from the current propositions. If you are stuck, here are the possible next steps, not including assumptions:"
                 }
                 for line in all_possible_next(&proof.read()) {
                     p {
@@ -45,47 +45,46 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                 onclick: move |_| {
                     let mut proof = proof.write();
                     let i = input.get();
-                    let oline = PLLine::from(i.as_str());
-                    if **started {
-                        if let Some(nline) = all_possible_next(&proof).iter().find(|l| {
-                                if let Some(ex) = &l.expr {
-                                    if let Some(exp) = &oline.expr {
-                                        if ex == exp {
-                                            return true;
+                    if let Ok(oline) = PLLine::from(i.as_str()) {
+                        if !**finished {
+                            if **started {
+                                if let Some(nline) = all_possible_next(&proof).iter().find(|l| {
+                                        if let Some(ex) = &l.expr {
+                                            if let Some(exp) = &oline.expr {
+                                                if ex == exp {
+                                                    return true;
+                                                }
+                                            }
                                         }
-                                    }
-                                }
-                                if let Some(ru) = &l.rule {
-                                    if let Some(rul) = &oline.rule {
-                                        if ru == rul && ru == &PLRule::Refute {
-                                            return true;
+                                        if let Some(ru) = &l.rule {
+                                            if let Some(rul) = &oline.rule {
+                                                if ru == rul && ru == &PLRule::Refute {
+                                                    return true;
+                                                }
+                                            }
                                         }
+                                        false
                                     }
+                                ) {
+                                    proof.push(PLLine { line: Some(*line_num.get()), expr: nline.expr.clone(), rule: nline.rule.clone() });
+                                    input.set(String::new());
+                                    line_num += 1;
+                                    match nline.rule {
+                                        Some(PLRule::Assume) => level += 1,
+                                        Some(PLRule::Contradiction(_, _)) => level -= 1,
+                                        Some(PLRule::Refute) => level -= 1,
+                                        _ => {}
+                                    }
+                                    if *level.get() == 0 {
+                                        finished.set(true);
+                                    }
+                                } else if oline.rule == Some(PLRule::Assume) {
+                                    proof.push(PLLine { line: Some(*line_num.get()), expr: oline.expr, rule: oline.rule });
+                                    input.set(String::new());
+                                    line_num += 1;
+                                    level += 1;
                                 }
-                                false
-                            }
-                        ) {
-                            proof.push(PLLine { line: Some(*line_num.get()), expr: oline.expr, rule: nline.rule.clone() });
-                            input.set(String::new());
-                            line_num += 1;
-                            match nline.rule {
-                                Some(PLRule::Assume) => level += 1,
-                                Some(PLRule::Contradiction(_, _)) => level -= 1,
-                                Some(PLRule::Refute) => level -= 1,
-                                _ => {}
-                            }
-                            if *level.get() == 0 {
-                                finished.set(true);
-                            }
-                        } else if oline.rule == Some(PLRule::Assume) {
-                            proof.push(PLLine { line: Some(*line_num.get()), expr: oline.expr, rule: oline.rule });
-                            input.set(String::new());
-                            line_num += 1;
-                            level += 1;
-                        }
-                    } else {
-                        match oline.expr {
-                            Some(PropositionalLogic::Not(box a)) => {
+                            } else if let Some(PropositionalLogic::Not(box a)) = oline.expr {
                                 if let Some(conc) = proof.iter().find(|l| {
                                     l.line.is_none()
                                 }) {
@@ -98,7 +97,6 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                                     }
                                 }
                             }
-                            _ => {}
                         }
                     }
                 },
@@ -250,6 +248,12 @@ struct PLLine {
     rule: Option<PLRule>,
 }
 
+impl PLLine {
+    fn from(input: &str) -> Result<Self, ()> {
+        parse_line(input).map(|(_, line)| line).map_err(|_| ())
+    }
+}
+
 fn generate_expr(level: u8) -> PropositionalLogic {
     let choice: u32 = random::<u32>() % 5;
     if level == 0 {
@@ -306,11 +310,40 @@ fn generate_argument() -> Vec<PLLine> {
     lines
 }
 
+fn get_atoms(expr: &PropositionalLogic) -> Vec<char> {
+    match expr {
+        PropositionalLogic::Var(var) => vec![*var],
+        PropositionalLogic::Not(expr) => get_atoms(expr),
+        PropositionalLogic::And(expr1, expr2) => {
+            let mut atoms = get_atoms(expr1);
+            atoms.append(&mut get_atoms(expr2));
+            atoms
+        }
+        PropositionalLogic::Or(expr1, expr2) => {
+            let mut atoms = get_atoms(expr1);
+            atoms.append(&mut get_atoms(expr2));
+            atoms
+        }
+        PropositionalLogic::Implies(expr1, expr2) => {
+            let mut atoms = get_atoms(expr1);
+            atoms.append(&mut get_atoms(expr2));
+            atoms
+        }
+        PropositionalLogic::Iff(expr1, expr2) => {
+            let mut atoms = get_atoms(expr1);
+            atoms.append(&mut get_atoms(expr2));
+            atoms
+        }
+    }
+}
+
 // return every possible next line of the proof
-fn all_possible_next(input: &Vec<PLLine>) -> Vec<PLLine> {
+fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
     let mut possiblities = Vec::new();
-    let mut proof = input.clone();
+    let mut proof = input.to_vec();
     let mut useable = Vec::new();
+
+    log::info!("in possible next");
 
     let mut assumption_level = 0;
     for line in proof.iter().rev() {
@@ -322,26 +355,44 @@ fn all_possible_next(input: &Vec<PLLine>) -> Vec<PLLine> {
 
         if let Some(PLRule::Contradiction(_, _)) = &line.rule {
             assumption_level += 1;
+        } else if let Some(PLRule::Refute) = &line.rule {
+            assumption_level += 1;
         } else if let Some(PLRule::Assume) = &line.rule {
             assumption_level -= 1;
         }
     }
 
+    if assumption_level >= 0 {
+        return possiblities;
+    }
+
+    let mut all_atoms = proof
+        .iter()
+        .filter(|x| x.line.is_some())
+        .flat_map(|x| get_atoms(x.expr.as_ref().unwrap()))
+        .collect::<Vec<char>>();
+
+    all_atoms.sort();
+    all_atoms.dedup();
+
+    let decided_atoms = proof
+        .iter()
+        .filter(|x| x.line.is_some())
+        .filter_map(|x| match x.expr.as_ref() {
+            Some(PropositionalLogic::Not(box PropositionalLogic::Var(var))) => Some(*var),
+            Some(PropositionalLogic::Var(var)) => Some(*var),
+            _ => None,
+        })
+        .collect::<Vec<char>>();
+
     useable.reverse();
 
     proof = proof
         .into_iter()
-        .zip(useable.into_iter())
-        .filter(|(_, useable)| *useable)
+        .zip(useable.iter())
+        .filter(|(_, useable)| **useable)
         .map(|(line, _)| line)
         .collect();
-
-    // if the last line is a refutation, then we're done
-    if let Some(line) = proof.last() {
-        if let Some(PLRule::Refute) = &line.rule {
-            return possiblities;
-        }
-    }
 
     for line in &proof {
         if line.line.is_none() {
@@ -500,39 +551,59 @@ fn all_possible_next(input: &Vec<PLLine>) -> Vec<PLLine> {
                 if sli.expr == Some(PropositionalLogic::Not(Box::new(expr.clone())))
                     && sli.line.is_some()
                 {
-                    let expr = proof
+                    if let Some(expr) = proof
                         .iter()
                         .rev()
                         .find(|x| matches!(x.rule, Some(PLRule::Assume)))
-                        .unwrap()
-                        .expr
-                        .clone();
-                    possiblities.push(PLLine {
-                        line: None,
-                        expr: match expr {
-                            Some(PropositionalLogic::Not(a)) => Some(*a),
-                            _ => None,
-                        },
-                        rule: Some(PLRule::Contradiction(sli.line.unwrap(), line.line.unwrap())),
-                    });
+                    {
+                        let expr = expr.expr.clone();
+                        possiblities.push(PLLine {
+                            line: None,
+                            expr: match expr {
+                                Some(PropositionalLogic::Not(a)) => Some(*a),
+                                Some(e) => Some(PropositionalLogic::Not(Box::new(e))),
+                                _ => None,
+                            },
+                            rule: Some(PLRule::Contradiction(
+                                sli.line.unwrap(),
+                                line.line.unwrap(),
+                            )),
+                        });
+                    }
                 }
             }
         }
     }
 
     possiblities.retain(|x| {
-        if proof.iter().any(|y| y.expr == x.expr && y.line.is_some() && !matches!(x.rule, Some(PLRule::Contradiction(_, _)))) {
+        if proof.iter().any(|y| {
+            y.expr == x.expr
+                && y.line.is_some()
+                && !matches!(x.rule, Some(PLRule::Contradiction(_, _)))
+        }) {
             return false;
         }
         true
     });
 
-    if possiblities.is_empty() {
-        possiblities.push(PLLine {
-            line: None,
-            expr: None,
-            rule: Some(PLRule::Refute),
-        });
+    log::info!("all atoms: {:?}", all_atoms);
+    log::info!("decided atoms: {:?}", decided_atoms);
+
+    if possiblities.is_empty() && all_atoms.len() <= decided_atoms.len() && assumption_level == -1 {
+        if let Some(expr) = proof
+            .iter()
+            .zip(useable.iter())
+            .filter_map(|(p, u)| if *u { Some(p) } else { None })
+            .rev()
+            .find(|x| x.rule == Some(PLRule::Assume))
+        {
+            let expr = expr.expr.clone();
+            possiblities.push(PLLine {
+                line: None,
+                expr,
+                rule: Some(PLRule::Refute),
+            });
+        }
     }
 
     possiblities
@@ -552,13 +623,6 @@ impl fmt::Display for PLLine {
             write!(f, " ({})", rule)?;
         }
         write!(f, "")
-    }
-}
-
-impl From<&str> for PLLine {
-    fn from(input: &str) -> Self {
-        let (_, line) = parse_line(input).unwrap();
-        line
     }
 }
 
@@ -742,7 +806,7 @@ fn parse_propositional_logic_not(input: &str) -> IResult<&str, PropositionalLogi
 
 fn parse_propositional_logic_neg(input: &str) -> IResult<&str, PropositionalLogic> {
     let (input, _) = tag("¬")(input)?;
-    let (input, expr) = parse_propositional_logic_atom(input)?;
+    let (input, expr) = parse_propositional_logic_not(input)?;
     Ok((input, PropositionalLogic::Not(Box::new(expr))))
 }
 
