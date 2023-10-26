@@ -25,7 +25,7 @@ pub struct AppProps {
 }
 
 fn main() {
-    dioxus_logger::init(log::LevelFilter::Error).expect("failed to init logger");
+    dioxus_logger::init(log::LevelFilter::Trace).expect("failed to init logger");
     dioxus_web::launch(App);
 }
 

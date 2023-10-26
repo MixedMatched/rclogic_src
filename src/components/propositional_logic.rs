@@ -8,12 +8,16 @@ use nom::{
 use rand::prelude::*;
 
 pub fn PropositionalLogic(cx: Scope) -> Element {
-    let proof = use_ref(cx, generate_argument);
+    let proof = use_ref(cx, || generate_argument(3, 4, [true, true, true, true, true]));
     let input = use_state(cx, String::new);
     let mut level = use_state(cx, || 0);
     let mut line_num = use_state(cx, || proof.read().len());
     let started = use_state(cx, || false);
     let finished = use_state(cx, || false);
+
+    let complexity = use_state(cx, || 3);
+    let num_li = use_state(cx, || 3);
+    let ops = use_state(cx, || [true, true, true, true, true]);
 
     cx.render(rsx! {
         aside {
@@ -27,6 +31,90 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
                 for line in all_possible_next(&proof.read()) {
                     p {
                         "{line.to_string()}"
+                    }
+                }
+            }
+            details {
+                summary {
+                    "Options"
+                }
+                p {
+                    "Complexity: "
+                    input {
+                        r#type: "number",
+                        value: "{complexity}",
+                        oninput: move |evt| complexity.set(evt.value.parse::<u8>().unwrap_or(3)),
+                    }
+                }
+                p {
+                    "Number of Lines: "
+                    input {
+                        r#type: "number",
+                        value: "{num_li}",
+                        oninput: move |evt| num_li.set(evt.value.parse::<usize>().unwrap_or(4)),
+                    }
+                }
+                p {
+                    "Operators: "
+                    button {
+                        onclick: move |_| {
+                            let mut ops_new = *ops.get();
+                            ops_new[0] = !ops_new[0];
+                            ops.set(ops_new);
+                        },
+                        if ops[0] {
+                            "∧"
+                        } else {
+                            "¬∧"
+                        }
+                    }
+                    button {
+                        onclick: move |_| {
+                            let mut ops_new = *ops.get();
+                            ops_new[1] = !ops_new[1];
+                            ops.set(ops_new);
+                        },
+                        if ops[1] {
+                            "↔"
+                        } else {
+                            "¬↔"
+                        }
+                    }
+                    button {
+                        onclick: move |_| {
+                            let mut ops_new = *ops.get();
+                            ops_new[2] = !ops_new[2];
+                            ops.set(ops_new);
+                        },
+                        if ops[2] {
+                            "→"
+                        } else {
+                            "¬→"
+                        }
+                    }
+                    button {
+                        onclick: move |_| {
+                            let mut ops_new = *ops.get();
+                            ops_new[3] = !ops_new[3];
+                            ops.set(ops_new);
+                        },
+                        if ops[3] {
+                            "¬"
+                        } else {
+                            "¬¬"
+                        }
+                    }
+                    button {
+                        onclick: move |_| {
+                            let mut ops_new = *ops.get();
+                            ops_new[4] = !ops_new[4];
+                            ops.set(ops_new);
+                        },
+                        if ops[4] {
+                            "∨"
+                        } else {
+                            "¬∨"
+                        }
                     }
                 }
             }
@@ -200,13 +288,17 @@ pub fn PropositionalLogic(cx: Scope) -> Element {
             }
             button {
                 onclick: move |_| {
-                    let mut proof = proof.write();
-                    *proof = generate_argument();
-                    input.set(String::new());
-                    line_num.set(proof.len());
-                    level.set(0);
-                    started.set(false);
-                    finished.set(false);
+                    if ops.get().iter().all(|x| !*x) {
+                        log::warn!("No operators selected!");
+                    } else {
+                        let mut proof = proof.write();
+                        *proof = generate_argument(*complexity.get(), *num_li.get(), *ops.get());
+                        input.set(String::new());
+                        line_num.set(proof.len());
+                        level.set(0);
+                        started.set(false);
+                        finished.set(false);
+                    }
                 },
                 "New Argument",
             }
@@ -254,8 +346,13 @@ impl PLLine {
     }
 }
 
-fn generate_expr(level: u8) -> PropositionalLogic {
-    let choice: u32 = random::<u32>() % 5;
+fn generate_expr(level: u8, ops: [bool; 5]) -> PropositionalLogic {
+    // take a random choice from the true values in ops
+    let choice = ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, x)| if *x { Some(i) } else { None })
+        .collect::<Vec<_>>()[random::<usize>() % ops.iter().filter(|x| **x).count()];
     if level == 0 {
         match choice {
             0 => PropositionalLogic::Var('P'),
@@ -268,42 +365,41 @@ fn generate_expr(level: u8) -> PropositionalLogic {
     } else {
         match choice {
             0 => PropositionalLogic::And(
-                Box::new(generate_expr(level - 1)),
-                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1, ops)),
+                Box::new(generate_expr(level - 1, ops)),
             ),
             1 => PropositionalLogic::Iff(
-                Box::new(generate_expr(level - 1)),
-                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1, ops)),
+                Box::new(generate_expr(level - 1, ops)),
             ),
             2 => PropositionalLogic::Implies(
-                Box::new(generate_expr(level - 1)),
-                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1, ops)),
+                Box::new(generate_expr(level - 1, ops)),
             ),
-            3 => PropositionalLogic::Not(Box::new(generate_expr(level - 1))),
+            3 => PropositionalLogic::Not(Box::new(generate_expr(level - 1, ops))),
             4 => PropositionalLogic::Or(
-                Box::new(generate_expr(level - 1)),
-                Box::new(generate_expr(level - 1)),
+                Box::new(generate_expr(level - 1, ops)),
+                Box::new(generate_expr(level - 1, ops)),
             ),
             _ => unreachable!(),
         }
     }
 }
 
-fn generate_argument() -> Vec<PLLine> {
-    let num: usize = random::<usize>() % 4;
+fn generate_argument(complexity: u8, line_num: usize, ops: [bool; 5]) -> Vec<PLLine> {
     let mut lines = Vec::new();
 
-    for i in 0..num {
+    for i in 0..line_num {
         lines.push(PLLine {
             line: Some(i + 1),
-            expr: Some(generate_expr(random::<u8>() % 4)),
+            expr: Some(generate_expr(random::<u8>() % complexity, ops)),
             rule: None,
         });
     }
 
     lines.push(PLLine {
         line: None,
-        expr: Some(generate_expr(random::<u8>() % 4)),
+        expr: Some(generate_expr(random::<u8>() % complexity, ops)),
         rule: None,
     });
 
@@ -337,22 +433,12 @@ fn get_atoms(expr: &PropositionalLogic) -> Vec<char> {
     }
 }
 
-// return every possible next line of the proof
-fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
-    let mut possiblities = Vec::new();
-    let mut proof = input.to_vec();
+fn get_usable(input: &[PLLine]) -> (Vec<bool>, i32) {
+    let proof = input.to_vec();
     let mut useable = Vec::new();
 
-    log::info!("in possible next");
-
     let mut assumption_level = 0;
-    for line in proof.iter().rev() {
-        if assumption_level <= 0 {
-            useable.push(true);
-        } else {
-            useable.push(false);
-        }
-
+    for line in proof.iter() {
         if let Some(PLRule::Contradiction(_, _)) = &line.rule {
             assumption_level += 1;
         } else if let Some(PLRule::Refute) = &line.rule {
@@ -360,11 +446,36 @@ fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
         } else if let Some(PLRule::Assume) = &line.rule {
             assumption_level -= 1;
         }
+
+        useable.push(assumption_level);
     }
 
+    log::info!("useable: {:?}", useable);
+    
+    let useable = useable.iter().rev().map(|x| {
+        *x >= assumption_level
+    }).rev().collect::<Vec<_>>();
+
+    log::info!("usable: {:?}", useable);
+
+    (useable, assumption_level)
+}
+
+// check if every proposition in the proof has been used or is an atom
+fn determine_fulfilled(input: &[PLLine]) -> bool {
+    let mut proof = input.to_vec();
+    let (useable, assumption_level) = get_usable(&proof);
+
     if assumption_level >= 0 {
-        return possiblities;
+        return false;
     }
+
+    proof = proof
+        .into_iter()
+        .zip(useable.iter())
+        .filter(|(_, useable)| **useable)
+        .map(|(line, _)| line)
+        .collect();
 
     let mut all_atoms = proof
         .iter()
@@ -385,7 +496,156 @@ fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
         })
         .collect::<Vec<char>>();
 
-    useable.reverse();
+    for line in proof
+        .iter()
+        .zip(useable.iter())
+        .filter(|(_, useable)| **useable)
+        .map(|(line, _)| line)
+    {
+        if line.line.is_none() {
+            continue;
+        }
+        if let Some(expr) = &line.expr {
+            match expr {
+                PropositionalLogic::And(a, b) => {
+                    if proof.iter().any(|x| x.expr == Some(*a.clone()))
+                        && proof.iter().any(|x| x.expr == Some(*b.clone()))
+                    {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Not(box PropositionalLogic::Implies(a, b)) => {
+                    if proof.iter().any(|x| x.expr == Some(*a.clone()))
+                        && proof
+                            .iter()
+                            .any(|x| x.expr == Some(PropositionalLogic::Not(b.clone())))
+                    {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Not(box PropositionalLogic::Or(a, b)) => {
+                    if proof
+                        .iter()
+                        .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*a.clone()))))
+                        && proof
+                            .iter()
+                            .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*b.clone()))))
+                    {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Not(box PropositionalLogic::Not(a)) => {
+                    if proof.iter().any(|x| x.expr == Some(*a.clone())) {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Iff(a, b) => {
+                    if proof.iter().any(|x| {
+                        x.expr
+                            == Some(PropositionalLogic::Implies(
+                                Box::new(*a.clone()),
+                                Box::new(*b.clone()),
+                            ))
+                    }) && proof.iter().any(|x| {
+                        x.expr
+                            == Some(PropositionalLogic::Implies(
+                                Box::new(*b.clone()),
+                                Box::new(*a.clone()),
+                            ))
+                    }) {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Not(box PropositionalLogic::Iff(a, b)) => {
+                    if proof.iter().any(|x| {
+                        x.expr
+                            == Some(PropositionalLogic::Or(
+                                Box::new(*a.clone()),
+                                Box::new(*b.clone()),
+                            ))
+                    }) && proof.iter().any(|x| {
+                        x.expr
+                            == Some(PropositionalLogic::Not(Box::new(PropositionalLogic::And(
+                                Box::new(*a.clone()),
+                                Box::new(*b.clone()),
+                            ))))
+                    }) {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Not(box PropositionalLogic::And(a, b)) => {
+                    if proof
+                        .iter()
+                        .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*a.clone()))))
+                        && proof
+                            .iter()
+                            .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*b.clone()))))
+                    {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Or(a, b) => {
+                    if proof
+                        .iter()
+                        .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*a.clone()))))
+                        && proof
+                            .iter()
+                            .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*b.clone()))))
+                    {
+                        continue;
+                    }
+                }
+                PropositionalLogic::Implies(a, b) => {
+                    if proof.iter().any(|x| x.expr == Some(*a.clone()))
+                        && proof
+                            .iter()
+                            .any(|x| x.expr == Some(PropositionalLogic::Not(Box::new(*b.clone()))))
+                    {
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            for sli in &proof {
+                if sli.expr == Some(PropositionalLogic::Not(Box::new(expr.clone())))
+                    && sli.line.is_some()
+                {
+                    if let Some(expr) = proof
+                        .iter()
+                        .rev()
+                        .find(|x| matches!(x.rule, Some(PLRule::Assume)))
+                    {
+                        let expr = expr.expr.clone();
+                        if let Some(PropositionalLogic::Not(a)) = expr {
+                            if proof.iter().any(|x| x.expr == Some(*a.clone())) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    log::info!("all atoms: {:?}", all_atoms);
+    log::info!("decided atoms: {:?}", decided_atoms);
+
+    if all_atoms.len() == decided_atoms.len() {
+        return true;
+    }
+
+    false
+}
+
+// return every possible next line of the proof
+fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
+    let mut possiblities = Vec::new();
+    let mut proof = input.to_vec();
+    let (useable, assumption_level) = get_usable(&proof);
+
+    if assumption_level >= 0 {
+        return possiblities;
+    }
 
     proof = proof
         .into_iter()
@@ -394,7 +654,12 @@ fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
         .map(|(line, _)| line)
         .collect();
 
-    for line in &proof {
+    for line in proof
+        .iter()
+        .zip(useable.iter())
+        .filter(|(_, useable)| **useable)
+        .map(|(line, _)| line)
+    {
         if line.line.is_none() {
             continue;
         }
@@ -586,10 +851,7 @@ fn all_possible_next(input: &[PLLine]) -> Vec<PLLine> {
         true
     });
 
-    log::info!("all atoms: {:?}", all_atoms);
-    log::info!("decided atoms: {:?}", decided_atoms);
-
-    if possiblities.is_empty() && all_atoms.len() <= decided_atoms.len() && assumption_level == -1 {
+    if possiblities.is_empty() && determine_fulfilled(input) {
         if let Some(expr) = proof
             .iter()
             .zip(useable.iter())
